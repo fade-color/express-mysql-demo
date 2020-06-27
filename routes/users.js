@@ -78,8 +78,8 @@ router.get('/books', function(req, res, next) {
       throw err;
     // 获取前台页面传入的参数
     var param = req.query || req.params;
-    var page = param.page || 1; // 当前页数，默认第1页
-    var num = param.num || 20; // 每页的数据个数，默认20条
+    var page = parseInt(param.page) || 1; // 当前页数，默认第1页
+    var num = parseInt(param.num) || 20; // 每页的数据个数，默认20条
     // 建立连接
     connection.query(userSQL.queryBooks, [num, (page - 1) * num], function (err, result) {
       if (result) {
