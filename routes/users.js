@@ -1,4 +1,5 @@
 var express = require('express');
+var utils = require('../utils/utils')
 var router = express.Router();
 
 // 导入MySQL模块
@@ -66,6 +67,47 @@ router.get('/findUser', function(req, res, next) {
       responseJSON(res, result);
       // 释放连接
       connection.release();
+    });
+  });
+});
+
+/* 获取用户列表（分页查询） */
+router.get('/books', function(req, res, next) {
+  pool.getConnection(function (err,connection) {
+    if (err)
+      throw err;
+    // 获取前台页面传入的参数
+    var param = req.query || req.params;
+    var page = param.page || 1; // 当前页数，默认第1页
+    var num = param.num || 20; // 每页的数据个数，默认20条
+    // 建立连接
+    connection.query(userSQL.queryBooks, [num, (page - 1) * num], function (err, result) {
+      if (result) {
+        var totalCount = parseInt(result[0][0]['COUNT(*)']); // 总条数
+        var totalPage = Math.ceil(totalCount / num); // 总页数，向上取整
+        var currentPage = page;
+        var isFirstPage = currentPage == 1;
+        var isLastPage = currentPage == totalPage;
+        var adjacentPage = utils.generateBookPages(currentPage, totalPage, 10); // 相邻页码，只显示相邻10页
+        var bookList = result[1]; // 数据
+        res.json({
+          code: 100,
+          msg: '处理成功',
+          totalCount: totalCount,
+          totalPage: totalPage,
+          currentPage: currentPage,
+          isFirstPage: isFirstPage,
+          isLastPage: isLastPage,
+          adjacentPage: adjacentPage,
+          bookList: bookList
+        })
+      } else {
+        responseJSON(res, result);
+      }
+      // 释放连接
+      connection.release();
+      if (err)
+        throw err;
     });
   });
 });

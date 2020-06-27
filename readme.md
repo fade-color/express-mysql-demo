@@ -101,11 +101,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 ```js
 module.exports = {
     mysql: {
-        host: '127.0.0.1', // ip地址
+        host: '47.114.6.104', // ip地址
         user: 'root', // 数据库连接用户名
         password: '123456', // 数据库连接密码
         database: 'express-mysql-demo', // 数据库名
-        port: 3306 // mysql端口号
+        port: 3306, // mysql端口号
+        multipleStatements: true // 开启同时执行多条语句，貌似不太安全
     }
 }
 ```
@@ -115,16 +116,47 @@ module.exports = {
 var UserSQL = {
     insert: 'INSERT INTO user(user_id, username, sex) VALUES(?,?,?)',
     queryAll: 'SELECT * FROM user',
-    getUserById: 'SELECT * FROM user WHERE user_id = ?'
+    getUserById: 'SELECT * FROM user WHERE user_id = ?',
+    queryBooks: 'SELECT COUNT(*) FROM books; SELECT * FROM books limit ? offset ?'
 }
 
 module.exports = UserSQL
 ```
 `usersql.js`的作用是提供增删改查语句。
 
+为了方便分页查询，在项目目录下新建utils文件夹，在该文件夹下新建`utils.js`文件，代码如下：
+```js
+module.exports.generateBookPages = function (page, totalPage, step) {
+    // 将参数转为数字
+    page = typeof page === 'number' ? page : parseInt(page);
+    totalPage = typeof totalPage === 'number' ? totalPage : parseInt(totalPage);
+    step = typeof step === 'number' ? step : parseInt(step);
+    if (totalPage <= step) {
+        // 总页数小于步长时
+        // 1 2 3 4 5 6 7  page = 4, total = 7, step = 10
+        return Array.from({length: totalPage}, (item, index) => index + 1);
+    }
+    if (page <= step / 2) {
+        // 前几页时
+        // 1 2 3 4 5 6 7 8 9 10 page <= 5, total = 20, step = 10
+        return Array.from({length: step}, (item, index) => index + 1);
+    }
+    if (page >= totalPage - step / 2) {
+        // 后几页时
+        // 11 12 13 14 15 16 17 18 19 20  page >= 15, total = 20, step = 10
+        return Array.from({length: step}, (item, index) => index + totalPage - step + 1);
+    }
+    // 其他
+    // 4 5 6 7 8 9 10 11 12 13  page = 8, total = 20, step = 10
+    return Array.from({length: step}, (item, index) => index + page - step / 2 + 1);
+}
+```
+该函数的作用是根据`当前页，总页数，步长`返回当前页相邻的页码。
+
 接着还需在routes目录下新建一个`users.js`向外暴露操作user的API接口，代码如下：
 ```js
 var express = require('express');
+var utils = require('../utils/utils')
 var router = express.Router();
 
 // 导入MySQL模块
@@ -137,16 +169,16 @@ var pool = mysql.createPool(dbConfig.mysql);
 
 // 响应一个json数据
 var responseJSON = function (res, ret) {
-  if (ret) {
+  if (!ret) { // 如果ret为undefined
+    res.json({
+      code: 200,
+      msg: '操作失败'
+    });
+  } else {
     res.json({
       code: 100,
       msg: '操作成功',
       data: ret
-    });
-  } else { // 如果ret为undefined
-    res.json({
-      code: 200,
-      msg: '操作失败'
     });
   }
 }
@@ -170,7 +202,7 @@ router.get('/addUser', (req, res, next) => {
 
 /* 获取用户列表 */
 router.get('/', function(req, res, next) {
-  pool.getConnection(function (err, connection) {
+  pool.getConnection(function (err,connection) {
     // 建立连接
     connection.query(userSQL.queryAll, [], function (err, result) {
       // 如果发生错误，result即为undefined
@@ -183,7 +215,7 @@ router.get('/', function(req, res, next) {
 
 // 根据id查找用户
 router.get('/findUser', function(req, res, next) {
-  pool.getConnection(function (err, connection) {
+  pool.getConnection(function (err,connection) {
     // 获取前台页面传入的参数
     var param = req.query || req.params;
     // 建立连接
@@ -192,6 +224,47 @@ router.get('/findUser', function(req, res, next) {
       responseJSON(res, result);
       // 释放连接
       connection.release();
+    });
+  });
+});
+
+/* 获取用户列表（分页查询） */
+router.get('/books', function(req, res, next) {
+  pool.getConnection(function (err,connection) {
+    if (err)
+      throw err;
+    // 获取前台页面传入的参数
+    var param = req.query || req.params;
+    var page = param.page || 1; // 当前页数，默认第1页
+    var num = param.num || 20; // 每页的数据个数，默认20条
+    // 建立连接
+    connection.query(userSQL.queryBooks, [num, (page - 1) * num], function (err, result) {
+      if (result) {
+        var totalCount = parseInt(result[0][0]['COUNT(*)']); // 总条数
+        var totalPage = Math.ceil(totalCount / num); // 总页数，向上取整
+        var currentPage = page;
+        var isFirstPage = currentPage == 1;
+        var isLastPage = currentPage == totalPage;
+        var adjacentPage = utils.generateBookPages(currentPage, totalPage, 10); // 相邻页码，只显示相邻10页
+        var bookList = result[1]; // 数据
+        res.json({
+          code: 100,
+          msg: '处理成功',
+          totalCount: totalCount,
+          totalPage: totalPage,
+          currentPage: currentPage,
+          isFirstPage: isFirstPage,
+          isLastPage: isLastPage,
+          adjacentPage: adjacentPage,
+          bookList: bookList
+        })
+      } else {
+        responseJSON(res, result);
+      }
+      // 释放连接
+      connection.release();
+      if (err)
+        throw err;
     });
   });
 });
@@ -258,6 +331,41 @@ module.exports = router;
           "username": "静静",
           "sex": "女"
         }
+      ]
+    }
+    ```
+  
+ - 查询第7页数据
+  
+    URL:<http://127.0.0.1:3000/users/books?page=7>
+      
+    返回数据：
+    ```json
+    {
+      "code": 100,
+      "msg": "处理成功",
+      "totalCount": 300,
+      "totalPage": 15,
+      "currentPage": "7",
+      "isFirstPage": false,
+      "isLastPage": false,
+      "adjacentPage": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+      "bookList": [
+        {
+          "book_id": 10120,
+          "book_name": "鞋化野受",
+          "book_type": "小说",
+          "book_aut": "秦勾",
+          "book_num": 10
+        },
+        {
+          "book_id": 10121,
+          "book_name": "里斯",
+          "book_type": "非小说类",
+          "book_aut": "鲁石盼屠",
+          "book_num": 10
+        },
+        ...
       ]
     }
     ```
