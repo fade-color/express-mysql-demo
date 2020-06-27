@@ -1,0 +1,12 @@
+GET http://127.0.0.1:3000/users
+Accept: application/json
+
+###
+GET http://127.0.0.1:3000/users/findUser?id=10006
+Accept: application/json
+
+###
+GET http://127.0.0.1:3000/users/addUser?id=10006&name=静静&sex=女
+Accept: application/json
+
+###
